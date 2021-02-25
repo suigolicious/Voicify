@@ -1,7 +1,7 @@
 const Discord = require("discord.js");
 const config = require("./config.json");
 const bot = new Discord.Client();
-var messageImportant = '@everyone i am important';
+var messageImportant = '@everyone notice me senpai';
 var messageWeewoo = 'I am litttttttteraly dying like you have to join me in my channel';
 var importantTextChannel = '';
 var importantVoiceChannel = '';
@@ -17,9 +17,11 @@ bot.on('voiceStateUpdate', (oldMember, newMember) => {
     // console.log(newUserChannel);
     // console.log(oldUserChannel);
     if(oldUserChannel === null && newUserChannel !== null) {
-      console.log(newMember.guild.channels.get(importantVoiceChannel).members.size);
-      if (bot.channels.get(importantVoiceChannel).members.size === 1 && 
-          newMember.guild.systemChannelID === importantVoiceChannel) {
+      console.log(newMember.guild.channels.cache.get(importantVoiceChannel).members.size);
+      console.log(newMember.channelID);
+      console.log(importantVoiceChannel)
+      if (newMember.guild.channels.cache.get(importantVoiceChannel).members.size === 1 && 
+          newMember.channelID == importantVoiceChannel) {
         if (importantTextChannel !== '') { 
           console.log('here!!!')
           bot.channels.cache.get(importantTextChannel).send(messageImportant);
@@ -45,6 +47,8 @@ bot.on('message', msg => {
       msg.channel.send('is a girl')
     } else if (msg.content === 'christian') {
       msg.channel.send('should stop gambling')
+    } else if (msg.content === 'rupert') {
+      msg.channel.send('is really really really really cool. (did the reallys convince you) no? yeah me neither.')
     }
   
     // user commands
@@ -69,7 +73,10 @@ bot.on('message', msg => {
     } else if (msg.content.split(' ')[0] === 'vsetupweewoo') {        // VSETUP-WEE-WOO
       var parse = msg.content.replace('vchannelweewoo ', '');
       var parseArr = parse.split(' ');
-      weewooVoiceChannel = parseArr[0];
+      weewooVoiceChannel = findChannelId(parseArr[0]);
+      if (importantVoiceChannel === weewooVoiceChannel) {
+        msg.channel.send('channel already ')
+      }
       parseArr.shift();
       weewooTargetUsers = parseArr;
     }
