@@ -42,13 +42,13 @@ else{
   shuffle(arr);
 }
 
-schedule.scheduleJob('0 56 22 * * *', function() {
+schedule.scheduleJob('0 0 10 * * *', function() {
   rp(qualityConvoUrl).then(function(html){
     console.log('successfully retrieved html');
     bot.guilds.cache.forEach(function(guild) {
       console.log('entered guild');
       var channelId;
-      var randomNum = arr[0] + 1;
+      var randomNum = arr[0];
       var string = String(html);
       var noHtml = string.replace(/(<([^>]+)>)/ig,'');
       var positionOfNum = noHtml.search(randomNum + '. ');
@@ -121,7 +121,7 @@ bot.on('message', msg => {
   if (msg.content === 'linda') {
     msg.channel.send('is the best');
   } else if (msg.content === 'brandon') {
-    msg.channel.send('is not the best')
+    msg.channel.send('is coincidentally also the best')
   } else if (msg.content === 'sashank') {
     msg.channel.send('is stoooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooopid')
   } else if (msg.content === 'shannon') {
