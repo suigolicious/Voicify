@@ -6,80 +6,100 @@ var schedule = require('node-schedule');
 const qualityConvoUrl = 'https://conversationstartersworld.com/250-conversation-starters/';
 const bot = new Discord.Client();
 const sqlite3 = require('sqlite3').verbose();
-let date_ob = new Date();
 var db;
+const fs = require('fs');
+const readline = require('readline');
+const {google} = require('googleapis');
+const SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly'];
+const TOKEN_PATH = 'token.json';
+var questionOfTheDay = '';
 
-var fs = require("fs");
+function authorize(credentials, callback) {
+  const {client_secret, client_id, redirect_uris} = credentials.installed;
+  const oAuth2Client = new google.auth.OAuth2(
+      client_id, client_secret, redirect_uris[0]);
 
-// shuffle function
-function shuffle(array) {
-  var currentIndex = array.length, temporaryValue, randomIndex;
-
-  // While there remain elements to shuffle...
-  while (0 !== currentIndex) {
-
-    // Pick a remaining element...
-    randomIndex = Math.floor(Math.random() * currentIndex);
-    currentIndex -= 1;
-
-    // And swap it with the current element.
-    temporaryValue = array[currentIndex];
-    array[currentIndex] = array[randomIndex];
-    array[randomIndex] = temporaryValue;
-  }
+  // Check if we have previously stored a token.
+  fs.readFile(TOKEN_PATH, (err, token) => {
+    if (err) return getNewToken(oAuth2Client, callback);
+    oAuth2Client.setCredentials(JSON.parse(token));
+    callback(oAuth2Client);
+  });
 }
 
-// check text file or make new array
-if(fs.existsSync("./array.txt")){
-  var arrtext = fs.readFileSync("./array.txt", "utf-8").split("\n");
-  var stringtext = arrtext[0]
-  console.log(typeof stringtext)
-  var arr = stringtext.split(",")
-  console.log(stringtext)
+function getNewToken(oAuth2Client, callback) {
+  const authUrl = oAuth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: SCOPES,
+  });
+  console.log('Authorize this app by visiting this url:', authUrl);
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  rl.question('Enter the code from that page here: ', (code) => {
+    rl.close();
+    oAuth2Client.getToken(code, (err, token) => {
+      if (err) return console.error('Error while trying to retrieve access token', err);
+      oAuth2Client.setCredentials(token);
+      // Store the token to disk for later program executions
+      fs.writeFile(TOKEN_PATH, JSON.stringify(token), (err) => {
+        if (err) return console.error(err);
+        console.log('Token stored to', TOKEN_PATH);
+      });
+      callback(oAuth2Client);
+    });
+  });
 }
-else{
-  var arr = [...Array(276).keys()];
-  shuffle(arr);
+
+function getQuestion(auth) {
+  const sheets = google.sheets({version: 'v4', auth});
+  var date1 = new Date("03/10/2021"); 
+  var date2 = new Date(); 
+    
+  // To calculate the time difference of two dates 
+  var Difference_In_Time = date2.getTime() - date1.getTime(); 
+    
+  // To calculate the no. of days between two dates 
+  var Difference_In_Days = Math.floor(Difference_In_Time / (1000 * 3600 * 24))+2; 
+      
+  sheets.spreadsheets.values.get({
+    spreadsheetId: '1syTZAaECyN3LYQr1BLmsxhODqN91l79_DzVR4iuJWAE',
+    range: 'B' + Difference_In_Days,
+  }, (err, res) => {
+    if (err) return console.log('The API returned an error: ' + err);
+    const rows = res.data.values;
+    if (rows.length) {
+      rows.map((row) => {
+        questionOfTheDay = `${row[0]}`.replace('\n', '');
+      });
+    } else {
+      console.log('No data found.');
+    }
+  });
 }
 
 schedule.scheduleJob('0 0 10 * * *', function() {
-  rp(qualityConvoUrl).then(function(html){
-    console.log('successfully retrieved html');
-    bot.guilds.cache.forEach(function(guild) {
-      console.log('entered guild');
-      var channelId;
-      var randomNum = arr[0];
-      var string = String(html);
-      var noHtml = string.replace(/(<([^>]+)>)/ig,'');
-      var positionOfNum = noHtml.search(randomNum + '. ');
-      for (var i = positionOfNum; i < html.length; i++) {
-        if (noHtml[i] == '\n' && noHtml[i+1] == '\n') {
-          var question;
-          if (noHtml[positionOfNum+positionOfNum.toString().length-1].match(/[A-Z]/i)) {
-            question = noHtml.substring(positionOfNum+positionOfNum.toString().length-1, i);
-          } else {
-            question = noHtml.substring(positionOfNum+positionOfNum.toString().length, i);
-          } 
-          question = question.replace(/\n/g, ' ');
-          question = question.replace('&#8217;', '\'');
-          guild.channels.cache.forEach(function(channel) {
-            if (channel.type === 'text' && !channelId) {
-              channelId = channel.id;
-            }
-          });
-          // console.log(question);
-          bot.channels.cache.get(channelId).send(question);
-          break;
-        }
-      }   
-    });
-    // delete first element 
-    arr.shift();
-    console.log(arr)
+  // Load client secrets from a local file.
+  fs.readFile('credentials.json', (err, content) => {
+    if (err) return console.log('Error loading client secret file:', err);
+    // Authorize a client with credentials, then call the Google Sheets API.
+    authorize(JSON.parse(content), getQuestion);
+  });
 
-    fs.writeFile( "./array.txt" ,arr.join().replace("[","").replace("]",""), function (err) {
-      if (err) throw err;
-      console.log('Replaced!');
+  bot.guilds.cache.forEach(function(guild) {
+    console.log('entered guild');
+    db.all('SELECT dailyQuestion FROM GUILD WHERE id = ' + guild.id, function(err, dailyQEnabled) {
+      if (dailyQEnabled === 1) {
+        var channelId;
+        guild.channels.cache.forEach(function(channel) {
+          if (channel.type === 'text' && !channelId) {
+            channelId = channel.id;
+          }
+        });
+        // console.log(question);
+        bot.channels.cache.get(channelId).send(questionOfTheDay);
+      }
     });
   })
   .catch(function(err){
@@ -117,34 +137,13 @@ bot.on('voiceStateUpdate', (oldMember, newMember) => {
 }); 
 
 bot.on('message', msg => {
-  // stupid hard-coded stuff
-  if (msg.content === 'linda') {
-    msg.channel.send('is the best');
-  } else if (msg.content === 'brandon') {
-    msg.channel.send('is coincidentally also the best')
-  } else if (msg.content === 'sashank') {
-    msg.channel.send('is stoooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooopid')
-  } else if (msg.content === 'shannon') {
-    msg.channel.send('is a girl')
-  } else if (msg.content === 'christian') {
-    msg.channel.send('should stop gambling')
-  } else if (msg.content === 'rupert') {
-    msg.channel.send('is really really really really cool. (did the reallys convince you) no? yeah me neither.')
-  } else if (msg.content === 'kevin') {
-    msg.channel.send('is a living meme generator')
-  } else if (msg.content === 'alex') {
-    msg.channel.send('is a boy')
-  } else if (msg.content === 'collin') {
-    msg.channel.send('now has a message. congrats. does it feel nice? accomplished? satisfied??')
-  }
-
   // user commands
-  if (msg.content.split(' ')[0] === '!channelimportant') {   // !CHANNEL-IMPORTANT
-    var parse = msg.content.replace('!channelimportant ', '');
+  if (msg.content.split(' ')[0] === '!channel') {   // !CHANNEL-IMPORTANT
+    var parse = msg.content.replace('!channel ', '');
     var guildId = msg.guild.id;
     var mainTextChannel = checkMainTextChannelCreated(msg);
     var importantVoiceChannel = findChannelId(msg, parse);
-    db.run(`INSERT INTO GUILD(id,text_channel,voice_channel) VALUES(?,?,?)`, [guildId, mainTextChannel, importantVoiceChannel], function(err) {
+    db.run(`INSERT INTO GUILD(id,text_channel,voice_channel,dailyQuestion) VALUES(?,?,?)`, [guildId, mainTextChannel, importantVoiceChannel, 0], function(err) {
       if (err) {
         db.run(sqlUpdate, [mainTextChannel, importantVoiceChannel, guildId], function(err) {
           if (err) {
@@ -155,16 +154,32 @@ bot.on('message', msg => {
       }
       console.log(`A row has been inserted with rowid ${this.lastID}`);
     });
-    msg.channel.send('important channel connected!');
-  } else if (msg.content === '!deletechannelimportant') {           // VDELETE-CHANNEL-IMPORTANT
+    msg.channel.send('Channel connected!');
+  } else if (msg.content === '!delete-channel') {           // VDELETE-CHANNEL-IMPORTANT
     db.run(`DELETE FROM GUILD WHERE id=?`, msg.guild.id, function(err) {
       if (err) {
         return console.error(err.message);
       }
       console.log(`Row(s) deleted ${this.changes}`);
     });
-    msg.channel.send('important channel connection deleted');
-  } 
+    msg.channel.send('Channel disconnected...');
+  } else if (msg.content === '!questions-start') {
+    var guildId = msg.guild.id;
+    db.run(`UPDATE GUILD SET dailyQuestion = ? WHERE id = ?`, [1, guildId], function(err) {
+      if (err) {
+        console.error(err.message);
+      }
+    });
+    msg.channel.send('Started one question a day every 10:00AM');
+  } else if(msg.content === '!questions-stop') {
+    var guildId = msg.guild.id;
+    db.run(`UPDATE GUILD SET dailyQuestion = ? WHERE id = ?`, [0, guildId], function(err) {
+      if (err) {
+        console.error(err.message);
+      }
+    });
+    msg.channel.send('Stopped daily questions');
+  }
 });
   
 function findChannelId(msg, tag) {
