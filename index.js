@@ -1,98 +1,212 @@
 const Discord = require("discord.js");
 const config = require("./config.json");
+const rp = require('request-promise');
+const $ = require('cheerio');
+var schedule = require('node-schedule');
+const qualityConvoUrl = 'https://conversationstartersworld.com/250-conversation-starters/';
 const bot = new Discord.Client();
-var messageImportant = '@everyone notice me senpai';
-var messageWeewoo = 'I am litttttttteraly dying like you have to join me in my channel';
-var importantTextChannel = '';
-var importantVoiceChannel = '';
-var weewooVoiceChannel = '';
-var weewooTargetUsers = [];
+const sqlite3 = require('sqlite3').verbose();
+var db;
+const fs = require('fs');
+const readline = require('readline');
+const {google} = require('googleapis');
+const SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly'];
+const TOKEN_PATH = 'token.json';
+
+function authorize(credentials, callback) {
+  const {client_secret, client_id, redirect_uris} = credentials.installed;
+  const oAuth2Client = new google.auth.OAuth2(
+      client_id, client_secret, redirect_uris[0]);
+
+  // Check if we have previously stored a token.
+  fs.readFile(TOKEN_PATH, (err, token) => {
+    if (err) return getNewToken(oAuth2Client, callback);
+    oAuth2Client.setCredentials(JSON.parse(token));
+    callback(oAuth2Client);
+  });
+}
+
+function getNewToken(oAuth2Client, callback) {
+  const authUrl = oAuth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: SCOPES,
+  });
+  console.log('Authorize this app by visiting this url:', authUrl);
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  rl.question('Enter the code from that page here: ', (code) => {
+    rl.close();
+    oAuth2Client.getToken(code, (err, token) => {
+      if (err) return console.error('Error while trying to retrieve access token', err);
+      oAuth2Client.setCredentials(token);
+      // Store the token to disk for later program executions
+      fs.writeFile(TOKEN_PATH, JSON.stringify(token), (err) => {
+        if (err) return console.error(err);
+        console.log('Token stored to', TOKEN_PATH);
+      });
+      callback(oAuth2Client);
+    });
+  });
+}
+
+function getQuestion(auth) {
+  const sheets = google.sheets({version: 'v4', auth});
+  var date1 = new Date("03/10/2021"); 
+  var date2 = new Date(); 
+    
+  // To calculate the time difference of two dates 
+  var Difference_In_Time = date2.getTime() - date1.getTime(); 
+    
+  // To calculate the no. of days between two dates 
+  var Difference_In_Days = Math.floor(Difference_In_Time / (1000 * 3600 * 24))+2; 
+      
+  sheets.spreadsheets.values.get({
+    spreadsheetId: '1syTZAaECyN3LYQr1BLmsxhODqN91l79_DzVR4iuJWAE',
+    range: 'B' + Difference_In_Days,
+  }, (err, res) => {
+    if (err) return console.log('The API returned an error: ' + err);
+    const rows = res.data.values;
+    if (rows.length) {
+      rows.map((row) => {
+        var questionOfTheDay = `${row[0]}`.replace('\n', '');
+
+        bot.guilds.cache.forEach(function(guild) {
+          console.log('entered guild');
+          db.all('SELECT dailyQuestion FROM GUILD WHERE id = ' + guild.id, function(err, rows) {
+            if (rows[0] && rows[0].dailyQuestion === 1) {
+              var channelId;
+              guild.channels.cache.forEach(function(channel) {
+                if (channel.type === 'text' && !channelId) {
+                  channelId = channel.id;
+                }
+              });
+              // console.log(question);
+              bot.channels.cache.get(channelId).send(questionOfTheDay);
+            }
+          })
+        })
+      });
+    } else {
+      console.log('No data found.');
+    }
+  });
+}
+
+schedule.scheduleJob('0 0 10 * * *', function() {
+  // Load client secrets from a local file.
+  fs.readFile('credentials.json', (err, content) => {
+    if (err) return console.log('Error loading client secret file:', err);
+    // Authorize a client with credentials, then call the Google Sheets API.
+    authorize(JSON.parse(content), getQuestion);
+  });
+});
 
 bot.login(config.BOT_TOKEN);
 
+bot.on('guildCreate', guild => {
+  // on entering new guild, add guildID and row into the database
+  db.run(`INSERT INTO GUILD(id,text_channel,voice_channel,dailyQuestion) VALUES(?,?,?,?)`, [guild.id, 0, 0, 0], function(err) {
+    if (err) {
+      console.log('guild aleady in database');
+      return;
+    }
+    console.log('new guild data created');
+  })
+});
+
+bot.on('ready', () => {
+  // initiate database
+  db = new sqlite3.Database('./db/voicify.db');
+});
+
 bot.on('voiceStateUpdate', (oldMember, newMember) => {
-    console.log('update');
     let newUserChannel = newMember.channel;
     let oldUserChannel = oldMember.channel;
-    // console.log(newUserChannel);
-    // console.log(oldUserChannel);
+
+    // check if user is ENTERING voice channel
     if(oldUserChannel === null && newUserChannel !== null) {
-      console.log(newMember.guild.channels.cache.get(importantVoiceChannel).members.size);
-      console.log(newMember.channelID);
-      console.log(importantVoiceChannel)
-      if (newMember.guild.channels.cache.get(importantVoiceChannel).members.size === 1 && 
-          newMember.channelID == importantVoiceChannel) {
-        if (importantTextChannel !== '') { 
-          console.log('here!!!')
-          bot.channels.cache.get(importantTextChannel).send(messageImportant);
+      // find the voice channel user has tied in with the alert
+      db.all('SELECT voice_channel FROM GUILD WHERE id = ' + newMember.guild.id, function(err, rows) {
+        // if user has not tied in any channel yet, return
+        if (!rows[0]) {
+          return;
         }
-      } else if (newMember.id === weewooVoiceChannel) {
-        //dm
-      }
+        var importantVoiceChannel = rows[0].voice_channel;
+
+        // only alert in text channel if first person that entered voice channel
+        if ((newMember.guild.channels.cache.get(importantVoiceChannel) && newMember.guild.channels.cache.get(importantVoiceChannel).members.size === 1)
+          && newMember.channelID == importantVoiceChannel) {
+          // grab text channel id from database
+          db.all('SELECT text_channel FROM GUILD WHERE id = ' + newMember.guild.id, function(err, rows) {
+            bot.channels.cache.get(rows[0].text_channel).send(newMember.member.displayName + ' has arrived');
+          }); 
+        }
+      })
     }
 }); 
 
 bot.on('message', msg => {
-    if (msg.content === 'send') {
-      
-    }
-    // stupid hard-coded stuff
-    if (msg.content === 'linda') {
-      msg.channel.send('is the best');
-    } else if (msg.content === 'brandon') {
-      msg.channel.send('is a poopy butt')
-    } else if (msg.content === 'sashank') {
-      msg.channel.send('is stoooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooopid')
-    } else if (msg.content === 'shannon') {
-      msg.channel.send('is a girl')
-    } else if (msg.content === 'christian') {
-      msg.channel.send('should stop gambling')
-    } else if (msg.content === 'rupert') {
-      msg.channel.send('is really really really really cool. (did the reallys convince you) no? yeah me neither.')
-    }
-  
-    // user commands
-    if (msg.content.split(' ')[0] === 'vmessageimportant') {          // MESSAGE-IMPORTANT
-      var parse = msg.content.replace('vmessageimportant ', '');
-      messageImportant = '@everyone ' + parse;
-      msg.channel.send('important message created!')
-    } else if (msg.content.split(' ')[0] === 'vchannelimportant') {   // VCHANNEL-IMPORTANT
-      var parse = msg.content.replace('vchannelimportant ', '');
-      var parseArr = parse.split(' ');
-      importantVoiceChannel = findChannelId(msg, parseArr[0]);
-      importantTextChannel = findChannelId(msg, parseArr[1]);
-      msg.channel.send('important channels created!');
-    } else if (msg.content === 'vdeletechannelimportant') {           // VDELETE-CHANNEL-IMPORTANT
-      importantVoiceChannel = '';
-      importantTextChannel = '';
-      msg.channel.send('important channel connections deleted');
-    } else if (msg.content.split(' ')[0] === 'vmessageweewoo') {      // VMESSAGE-WEE-WOO
-      var parse = msg.content.replace('vmessageweewoo ', '');
-      messageWeewoo = parse;
-      msg.channel.send('life or death dm created');
-    } else if (msg.content.split(' ')[0] === 'vsetupweewoo') {        // VSETUP-WEE-WOO
-      var parse = msg.content.replace('vchannelweewoo ', '');
-      var parseArr = parse.split(' ');
-      weewooVoiceChannel = findChannelId(parseArr[0]);
-      if (importantVoiceChannel === weewooVoiceChannel) {
-        msg.channel.send('channel already ')
+  // user commands
+  if (msg.content.split(' ')[0] === '!channel') {   // !CHANNEL-IMPORTANT
+    var parse = msg.content.replace('!channel ', '');
+    var guildId = msg.guild.id;
+    var mainTextChannel = checkMainTextChannelCreated(msg);
+    var importantVoiceChannel = findChannelId(msg, parse);
+    db.run(`UPDATE GUILD SET text_channel = ?, voice_channel = ? WHERE id = ?`, [mainTextChannel, importantVoiceChannel, guildId], function(err) {
+      if (err) {
+        return console.error(err.message);
       }
-      parseArr.shift();
-      weewooTargetUsers = parseArr;
-    }
-  });
-  
-
-  function findChannelId(msg, tag) {
-    var id = '';
-    msg.guild.channels.cache.forEach(function (channel) {
-      if (channel.name === tag) {
-        id = channel.id;
+      console.log(`Row(s) updated: ${this.changes}`);
+    });
+    msg.channel.send('Channel connected!');
+  } else if (msg.content === '!delete-channel') {           // VDELETE-CHANNEL-IMPORTANT
+    var guildId = msg.guild.id;
+    db.run(`UPDATE GUILD SET text_channel = ?, voice_channel = ? WHERE id = ?`, [0, 0, guildId], function(err) {
+      if (err) {
+        return console.error(err.message);
+      }
+      console.log(`Row(s) deleted: ${this.changes}`);
+    });
+    msg.channel.send('Channel disconnected...');
+  } else if (msg.content === '!start-questions') {
+    var guildId = msg.guild.id;
+    db.run(`UPDATE GUILD SET dailyQuestion = ? WHERE id = ?`, [1, guildId], function(err) {
+      if (err) {
+        console.error(err.message);
       }
     });
-    return id;
-  }
+    msg.channel.send('Started one question a day every 10:00AM');
+  } else if(msg.content === '!stop-questions') {
+    var guildId = msg.guild.id;
+    db.run(`UPDATE GUILD SET dailyQuestion = ? WHERE id = ?`, [0, guildId], function(err) {
+      if (err) {
+        console.error(err.message);
+      }
+    });
+    msg.channel.send('Stopped daily questions');
+  } 
+});
   
-  function findUserId(tag) {
+function findChannelId(msg, tag) {
+  var id = '';
+  msg.guild.channels.cache.forEach(function (channel) {
+    if (channel.name === tag) {
+      id = channel.id;
+    }
+  });
+  return id;
+}
   
-  }
+function checkMainTextChannelCreated(msg) {
+  var mainTextChannel;
+  var foundMatch = false
+  msg.guild.channels.cache.forEach(function(channel) {
+    if (channel.type === 'text' && !foundMatch) {
+      mainTextChannel = channel.id;
+      foundMatch = true;
+    }
+  });
+  return mainTextChannel;
+}
