@@ -5,6 +5,14 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Files
+array.txt
+file.csv
+
+# Database
+.DS_Store
+voicify.db
+
 # Runtime data
 pids
 *.pid
