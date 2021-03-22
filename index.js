@@ -3,7 +3,6 @@ const config = require("./config.json");
 const rp = require('request-promise');
 const $ = require('cheerio');
 var schedule = require('node-schedule');
-const qualityConvoUrl = 'https://conversationstartersworld.com/250-conversation-starters/';
 const bot = new Discord.Client();
 const sqlite3 = require('sqlite3').verbose();
 var db;
@@ -73,7 +72,6 @@ function getQuestion(auth) {
         var questionOfTheDay = `${row[0]}`.replace('\n', '');
 
         bot.guilds.cache.forEach(function(guild) {
-          console.log('entered guild');
           db.all('SELECT daily_question FROM guilds WHERE guild_id = ' + guild.id, function(err, rows) {
             if (rows[0] && rows[0].daily_question === 1) {
               var channelId;
@@ -82,7 +80,6 @@ function getQuestion(auth) {
                   channelId = channel.id;
                 }
               });
-              // console.log(question);
               bot.channels.cache.get(channelId).send(questionOfTheDay);
             }
           })
@@ -101,6 +98,7 @@ schedule.scheduleJob('0 0 10 * * *', function() {
     // Authorize a client with credentials, then call the Google Sheets API.
     authorize(JSON.parse(content), getQuestion);
   });
+  console.log('daily question sent');
 });
 
 bot.login(config.BOT_TOKEN);
@@ -113,7 +111,7 @@ bot.on('guildCreate', guild => {
       console.log('guild probably aleady in database');
       return;
     }
-    console.log('new guild data created');
+    console.log('new guild data created, your bot is now in ' + bot.guilds.cache.size + ' servers');
   })
 });
 
@@ -137,6 +135,7 @@ bot.on('voiceStateUpdate', (oldMember, newMember) => {
     if(oldUserChannel === null && newUserChannel !== null) {
       // find the voice channel user has tied in with the alert
       db.all('SELECT voice_channel FROM guilds WHERE guild_id = ' + newMember.guild.id, function(err, rows) {
+        if (err) console.log(err);
         // if user has not tied in any channel yet, return
         if (!rows[0]) {
           return;
@@ -149,6 +148,7 @@ bot.on('voiceStateUpdate', (oldMember, newMember) => {
           // grab text channel id from database
           db.all('SELECT text_channel FROM guilds WHERE guild_id = ' + String(newMember.guild.id), function(err, rows) {
             bot.channels.cache.get(rows[0].text_channel).send(newMember.member.displayName + ' has arrived');
+            console.log(newMember.member.displayName + ' used voice state');
           }); 
         }
       })
@@ -166,9 +166,12 @@ bot.on('message', msg => {
       if (err) {
         return console.error(err.message);
       }
-      console.log(`Row(s) updated: ${this.changes}`);
+      console.log('connected voice channel ' + importantVoiceChannel + ' aka ' + parse);
     });
     msg.channel.send('Channel connected!');
+  } else if (msg.content === '!help') {
+    msg.channel.send('Commands are at the bottom of this page: https://top.gg/bot/811077027927031828 \nContribute to daily questions here: https://forms.gle/ejuRjbnbgQRYPkfJ8');
+    console.log('help message sent');
   } else if (msg.content === '!delete-channel') {           // VDELETE-CHANNEL-IMPORTANT
     var guildId = msg.guild.id;
     db.run(`UPDATE guilds SET text_channel = ?, voice_channel = ? WHERE guild_id = ?`, ['0', '0', String(guildId)], function(err) {
@@ -186,6 +189,7 @@ bot.on('message', msg => {
       }
     });
     msg.channel.send('Started one question a day every 10:00AM');
+    console.log('someone has started daily questions');
   } else if(msg.content === '!stop-questions') {
     var guildId = msg.guild.id;
     db.run(`UPDATE guilds SET daily_question = ? WHERE guild_id = ?`, [0, String(guildId)], function(err) {
@@ -194,6 +198,7 @@ bot.on('message', msg => {
       }
     });
     msg.channel.send('Stopped daily questions');
+    console.log('someone has stopped daily questions');
   } 
 });
   
