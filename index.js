@@ -52,7 +52,7 @@ function getNewToken(oAuth2Client, callback) {
 
 function getQuestion(auth) {
   const sheets = google.sheets({version: 'v4', auth});
-  var date1 = new Date("03/10/2021"); 
+  var date1 = new Date("03/15/2021"); 
   var date2 = new Date(); 
     
   // To calculate the time difference of two dates 
@@ -134,10 +134,11 @@ bot.on('voiceStateUpdate', (oldMember, newMember) => {
     // check if user is ENTERING voice channel
     if(oldUserChannel === null && newUserChannel !== null) {
       // find the voice channel user has tied in with the alert
-      db.all('SELECT voice_channel FROM guilds WHERE guild_id = ' + newMember.guild.id, function(err, rows) {
+      db.all('SELECT voice_channel FROM guilds WHERE guild_id = ' + String(newMember.guild.id), function(err, rows) {
         if (err) console.log(err);
         // if user has not tied in any channel yet, return
         if (!rows[0]) {
+          console.log('Did not find tied in channel');
           return;
         }
         var importantVoiceChannel = rows[0].voice_channel;
@@ -145,8 +146,14 @@ bot.on('voiceStateUpdate', (oldMember, newMember) => {
         // only alert in text channel if first person that entered voice channel
         if ((newMember.guild.channels.cache.get(importantVoiceChannel) && newMember.guild.channels.cache.get(importantVoiceChannel).members.size === 1)
           && newMember.channelID == importantVoiceChannel) {
+          console.log(newMember.member.displayName + ' has a voice channel connected and is trying to access voice state.');
           // grab text channel id from database
+          console.log('Found text channel from database for ' + newMember.member.displayName);
           db.all('SELECT text_channel FROM guilds WHERE guild_id = ' + String(newMember.guild.id), function(err, rows) {
+            if (err) console.log(err);
+            if (!rows[0]) {
+              console.log('Did not find tied in text channel for ' + newMember.member.displayName);
+            }
             bot.channels.cache.get(rows[0].text_channel).send(newMember.member.displayName + ' has arrived');
             console.log(newMember.member.displayName + ' used voice state');
           }); 
@@ -205,6 +212,7 @@ bot.on('message', msg => {
 function findChannelId(msg, tag) {
   var id = '';
   msg.guild.channels.cache.forEach(function (channel) {
+    console.log(channel.name);
     if (channel.name === tag) {
       id = channel.id;
     }
