@@ -3,7 +3,6 @@ const config = require("./config.json");
 const rp = require('request-promise');
 const $ = require('cheerio');
 var schedule = require('node-schedule');
-const qualityConvoUrl = 'https://conversationstartersworld.com/250-conversation-starters/';
 const bot = new Discord.Client();
 const sqlite3 = require('sqlite3').verbose();
 var db;
@@ -53,7 +52,7 @@ function getNewToken(oAuth2Client, callback) {
 
 function getQuestion(auth) {
   const sheets = google.sheets({version: 'v4', auth});
-  var date1 = new Date("03/10/2021"); 
+  var date1 = new Date("03/15/2021"); 
   var date2 = new Date(); 
     
   // To calculate the time difference of two dates 
@@ -73,16 +72,14 @@ function getQuestion(auth) {
         var questionOfTheDay = `${row[0]}`.replace('\n', '');
 
         bot.guilds.cache.forEach(function(guild) {
-          console.log('entered guild');
-          db.all('SELECT dailyQuestion FROM GUILD WHERE id = ' + guild.id, function(err, rows) {
-            if (rows[0] && rows[0].dailyQuestion === 1) {
+          db.all('SELECT daily_question FROM guilds WHERE guild_id = ' + guild.id, function(err, rows) {
+            if (rows[0] && rows[0].daily_question === 1) {
               var channelId;
               guild.channels.cache.forEach(function(channel) {
                 if (channel.type === 'text' && !channelId) {
                   channelId = channel.id;
                 }
               });
-              // console.log(question);
               bot.channels.cache.get(channelId).send(questionOfTheDay);
             }
           })
@@ -101,24 +98,33 @@ schedule.scheduleJob('0 0 10 * * *', function() {
     // Authorize a client with credentials, then call the Google Sheets API.
     authorize(JSON.parse(content), getQuestion);
   });
+  console.log('daily question sent');
 });
 
 bot.login(config.BOT_TOKEN);
 
 bot.on('guildCreate', guild => {
   // on entering new guild, add guildID and row into the database
-  db.run(`INSERT INTO GUILD(id,text_channel,voice_channel,dailyQuestion) VALUES(?,?,?,?)`, [guild.id, 0, 0, 0], function(err) {
+  db.run(`INSERT INTO guilds(guild_id,text_channel,voice_channel,daily_question) VALUES(?,?,?,?)`, [String(guild.id), 0, 0, 0], function(err) {
     if (err) {
-      console.log('guild aleady in database');
+      console.log(err);
+      console.log('guild probably aleady in database');
       return;
     }
-    console.log('new guild data created');
+    console.log('new guild data created, your bot is now in ' + bot.guilds.cache.size + ' servers');
   })
+});
+
+bot.on('guildDelete', guild => {
+  db.run(`DELETE FROM guilds WHERE guild_id=?`, guild.id, function(err) {
+    if (err) console.log(err);
+  });
+  console.log('Left guild with id ' + guild.id); 
 });
 
 bot.on('ready', () => {
   // initiate database
-  db = new sqlite3.Database('./db/voicify.db');
+  db = new sqlite3.Database('./db/stayinAlive');
 });
 
 bot.on('voiceStateUpdate', (oldMember, newMember) => {
@@ -128,9 +134,11 @@ bot.on('voiceStateUpdate', (oldMember, newMember) => {
     // check if user is ENTERING voice channel
     if(oldUserChannel === null && newUserChannel !== null) {
       // find the voice channel user has tied in with the alert
-      db.all('SELECT voice_channel FROM GUILD WHERE id = ' + newMember.guild.id, function(err, rows) {
+      db.all('SELECT voice_channel FROM guilds WHERE guild_id = ' + String(newMember.guild.id), function(err, rows) {
+        if (err) console.log(err);
         // if user has not tied in any channel yet, return
         if (!rows[0]) {
+          console.log('Did not find tied in channel');
           return;
         }
         var importantVoiceChannel = rows[0].voice_channel;
@@ -138,9 +146,16 @@ bot.on('voiceStateUpdate', (oldMember, newMember) => {
         // only alert in text channel if first person that entered voice channel
         if ((newMember.guild.channels.cache.get(importantVoiceChannel) && newMember.guild.channels.cache.get(importantVoiceChannel).members.size === 1)
           && newMember.channelID == importantVoiceChannel) {
+          console.log(newMember.member.displayName + ' has a voice channel connected and is trying to access voice state.');
           // grab text channel id from database
-          db.all('SELECT text_channel FROM GUILD WHERE id = ' + newMember.guild.id, function(err, rows) {
+          console.log('Found text channel from database for ' + newMember.member.displayName);
+          db.all('SELECT text_channel FROM guilds WHERE guild_id = ' + String(newMember.guild.id), function(err, rows) {
+            if (err) console.log(err);
+            if (!rows[0]) {
+              console.log('Did not find tied in text channel for ' + newMember.member.displayName);
+            }
             bot.channels.cache.get(rows[0].text_channel).send(newMember.member.displayName + ' has arrived');
+            console.log(newMember.member.displayName + ' used voice state');
           }); 
         }
       })
@@ -154,16 +169,19 @@ bot.on('message', msg => {
     var guildId = msg.guild.id;
     var mainTextChannel = checkMainTextChannelCreated(msg);
     var importantVoiceChannel = findChannelId(msg, parse);
-    db.run(`UPDATE GUILD SET text_channel = ?, voice_channel = ? WHERE id = ?`, [mainTextChannel, importantVoiceChannel, guildId], function(err) {
+    db.run(`UPDATE guilds SET text_channel = ?, voice_channel = ? WHERE guild_id = ?`, [String(mainTextChannel), String(importantVoiceChannel), String(guildId)], function(err) {
       if (err) {
         return console.error(err.message);
       }
-      console.log(`Row(s) updated: ${this.changes}`);
+      console.log('connected voice channel ' + importantVoiceChannel + ' aka ' + parse);
     });
     msg.channel.send('Channel connected!');
+  } else if (msg.content === '!help') {
+    msg.channel.send('Commands are at the bottom of this page: https://top.gg/bot/811077027927031828 \nContribute to daily questions here: https://forms.gle/ejuRjbnbgQRYPkfJ8');
+    console.log('help message sent');
   } else if (msg.content === '!delete-channel') {           // VDELETE-CHANNEL-IMPORTANT
     var guildId = msg.guild.id;
-    db.run(`UPDATE GUILD SET text_channel = ?, voice_channel = ? WHERE id = ?`, [0, 0, guildId], function(err) {
+    db.run(`UPDATE guilds SET text_channel = ?, voice_channel = ? WHERE guild_id = ?`, ['0', '0', String(guildId)], function(err) {
       if (err) {
         return console.error(err.message);
       }
@@ -172,26 +190,29 @@ bot.on('message', msg => {
     msg.channel.send('Channel disconnected...');
   } else if (msg.content === '!start-questions') {
     var guildId = msg.guild.id;
-    db.run(`UPDATE GUILD SET dailyQuestion = ? WHERE id = ?`, [1, guildId], function(err) {
+    db.run(`UPDATE guilds SET daily_question = ? WHERE guild_id = ?`, [1, String(guildId)], function(err) {
       if (err) {
         console.error(err.message);
       }
     });
     msg.channel.send('Started one question a day every 10:00AM');
+    console.log('someone has started daily questions');
   } else if(msg.content === '!stop-questions') {
     var guildId = msg.guild.id;
-    db.run(`UPDATE GUILD SET dailyQuestion = ? WHERE id = ?`, [0, guildId], function(err) {
+    db.run(`UPDATE guilds SET daily_question = ? WHERE guild_id = ?`, [0, String(guildId)], function(err) {
       if (err) {
         console.error(err.message);
       }
     });
     msg.channel.send('Stopped daily questions');
+    console.log('someone has stopped daily questions');
   } 
 });
   
 function findChannelId(msg, tag) {
   var id = '';
   msg.guild.channels.cache.forEach(function (channel) {
+    console.log(channel.name);
     if (channel.name === tag) {
       id = channel.id;
     }
